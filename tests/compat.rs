@@ -85,3 +85,64 @@ fn gc_matches_bedtools_nuc() {
 
     let _ = std::fs::remove_file(&bed_path);
 }
+
+/// Windows that span N bases must use total window length as denominator, matching bedtools nuc.
+/// (Previously we divided by window-N, which gave wrong results for N-containing windows.)
+#[test]
+fn gc_n_windows_match_bedtools() {
+    if !bedtools_available() {
+        eprintln!("skipping: bedtools not found");
+        return;
+    }
+    let fa = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/n_windows.fa");
+
+    let our_out = Command::new(ours())
+        .args(["-w", "4"])
+        .arg(&fa)
+        .output()
+        .unwrap();
+    assert!(our_out.status.success());
+    let our_text = String::from_utf8(our_out.stdout).unwrap();
+
+    let bed_path = std::env::temp_dir().join("gc_n_windows_compat.bed");
+    let bed_content: String = our_text
+        .lines()
+        .map(|l| {
+            let p: Vec<&str> = l.split('\t').collect();
+            format!("{}\t{}\t{}\n", p[0], p[1], p[2])
+        })
+        .collect();
+    std::fs::write(&bed_path, &bed_content).unwrap();
+
+    let bt_out = Command::new("bedtools")
+        .args([
+            "nuc",
+            "-fi",
+            fa.to_str().unwrap(),
+            "-bed",
+            bed_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(bt_out.status.success());
+    let bt_text = String::from_utf8(bt_out.stdout).unwrap();
+
+    let our_gc: Vec<f64> = our_text
+        .lines()
+        .filter_map(|l| l.split('\t').nth(3)?.parse().ok())
+        .collect();
+    let bt_gc: Vec<f64> = bt_text
+        .lines()
+        .skip(1)
+        .filter_map(|l| l.split('\t').nth(4)?.parse().ok())
+        .collect();
+
+    assert_eq!(our_gc.len(), bt_gc.len(), "window count mismatch");
+    for (i, (ours, theirs)) in our_gc.iter().zip(bt_gc.iter()).enumerate() {
+        assert!(
+            (ours - theirs).abs() < 0.001,
+            "N-window {i}: GC {ours:.4} vs bedtools {theirs:.6}"
+        );
+    }
+    let _ = std::fs::remove_file(&bed_path);
+}

@@ -26,14 +26,9 @@ pub fn gc_windows(fasta: &Path, window: usize, step: usize, output: &mut dyn Wri
                 .iter()
                 .filter(|&&b| matches!(b, b'G' | b'g' | b'C' | b'c'))
                 .count();
-            let n = w.iter().filter(|&&b| matches!(b, b'N' | b'n')).count();
-            let effective = window - n;
+            // bedtools nuc divides by total window length (N bases included in denominator).
             #[allow(clippy::cast_precision_loss)]
-            let pct = if effective > 0 {
-                gc as f64 / effective as f64
-            } else {
-                0.0
-            };
+            let pct = gc as f64 / window as f64;
             writeln!(out, "{name}\t{start}\t{}\t{pct:.4}", start + window)
                 .map_err(RsomicsError::Io)?;
             count += 1;
